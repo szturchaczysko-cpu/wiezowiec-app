@@ -900,7 +900,7 @@ with tab_autopilot:
     st.caption("Wybierz operatorów per grupa. Casy zostaną podzielone po równo i przeliczone pod imieniem operatora.")
 
     # Wszyscy operatorzy z systemu (z tabeli promptu 3.4)
-    ALL_OPERATORS_LIST = ["Emilia", "Oliwia", "Magda", "Ewelina", "Iwona", "Marlena", "Sylwia", "EwelinaG", "Andrzej", "Marta", "Klaudia"]
+    ALL_OPERATORS_LIST = ["Emilia", "Oliwia", "Magda", "Ewelina", "Iwona", "Marlena", "Sylwia", "EwelinaG", "Andrzej", "Marta", "Klaudia", "Kasia"]
     # Grupy operatorskie per dział
     GRUPA_MAP = {"DE": "Operatorzy_DE", "FR": "Operatorzy_FR", "UKPL": "Operatorzy_UK/PL"}
 
