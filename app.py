@@ -4681,8 +4681,13 @@ with tab_telefony:
                    for _d in _deleg_ext if str(_d.get("id_postu") or "").strip()}
     for _c in _calls_op:
         _po_wpis = None
+        # 🟥 Telefon zapamiętuje numer ZLECENIA, które po nim powstało — wiążemy po nim.
+        #    post_id to numer RAPORTU (do linku), więc nie nadaje się do scalania.
+        _pid_z = str(_c.get("zlec_po_tel") or "").strip()
         _pid_c = str(_c.get("post_id") or "").strip()
-        if _pid_c and _pid_c in _zlec_po_id:
+        if _pid_z and _pid_z in _zlec_po_id:
+            _po_wpis = _zlec_po_id[_pid_z]
+        elif _pid_c and _pid_c in _zlec_po_id:
             _po_wpis = _zlec_po_id[_pid_c]
         else:
             _t_c = _dt(_c)
@@ -5009,6 +5014,9 @@ with tab_telefony:
                    "w godzinach roboczych (9–17, bez weekendów).")
 
         # ── zbieramy kroki per zamówienie ──
+        # 🟥 Sprawa pojawia się w dniu, w którym ZACZĄŁ SIĘ jej wątek telefoniczny.
+        #    Telefon wykonany dzień później to kontynuacja tamtej pracy — pokazujemy ją
+        #    przy dniu startu, nie przy dniu telefonu.
         _hist = {}
         for _z in _deleg_ext:
             _nrh = str(_z.get("numer_zamowienia") or "").strip()
@@ -5048,6 +5056,10 @@ with tab_telefony:
         _karty = []
         for _nrh, _kr in _hist.items():
             _kr.sort(key=lambda r: r["t"])
+            # kotwica = PIERWSZY wpis telefoniczny sprawy; musi mieścić się w zakresie
+            _start = _kr[0]["t"][:10] if _kr else ""
+            if _start not in _dni_set:
+                continue
             _dts = [r["dt"] for r in _kr if r["dt"]]
             _trwa = _biz_min(_dts[0], _dts[-1]) if len(_dts) > 1 else 0
             _ile_tel = sum(1 for r in _kr if r["typ"] == "tel")
