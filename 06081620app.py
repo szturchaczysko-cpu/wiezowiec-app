@@ -4582,7 +4582,14 @@ with tab_telefony:
     # 🟥 PODBICIE, POD KTÓRYM PADŁA ODPOWIEDŹ, jest osobnym wezwaniem — dostaje własny
     #    wiersz, własne ID i własny czas reakcji. Mogły dzwonić dwie różne osoby i każda
     #    zasługuje na ocenę. Podbicie BEZ odpowiedzi zostaje tylko licznikiem przy zleceniu.
-    _zlec_only = [d for d in _deleg_ext if (d.get("typ") or "zlecenie") == "zlecenie"
+    # 🟥 Wpis po nieudanym telefonie operatora bywa oznaczony jako PONAGLENIE (bo wcześniej
+    #    coś już szło do tej grupy), a mimo to jest samodzielnym zleceniem — ma własny telefon,
+    #    który go wywołał. Bez tego wiersz nie powstawał i ciąg urywał się na „SESJA — Romana".
+    _id_po_tel = {str(_c.get("zlec_po_tel") or "").strip()
+                  for _c in _calls if str(_c.get("zlec_po_tel") or "").strip()}
+    _zlec_only = [d for d in _deleg_ext
+                  if ((d.get("typ") or "zlecenie") == "zlecenie"
+                      or str(d.get("id_postu") or "").strip() in _id_po_tel)
                   and _aktywne_w_zakresie(d)]
     _pon_z_odp = [d for d in _deleg_ext if (d.get("typ") or "") == "ponaglenie"
                   and str(d.get("id_postu") or "").strip() in _odp_pod_id
