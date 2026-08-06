@@ -4630,382 +4630,135 @@ with tab_telefony:
         _jez_map[(_o.get("operator"), _kraj(_o))] = _o.get("jezyki") or []
 
     # ══ 1. ROZLICZENIE OKRESU — PER KRAJ ════════════════════════════════════════
-    st.markdown("### 🥧 Rozliczenie okresu — udział w obrębie kraju")
-    st.caption("Dla KAŻDEGO kraju osobne 100%: telefony wykonane przez osoby i grupy pracujące na tym "
-               "materiale + zlecenia, przy których nikt nie zadzwonił.")
-    _kraje = sorted({_kraj(x) for x in _calls} | {_kraj(x) for x in _zlecenia})
-    if not _kraje:
-        st.info("Brak telefonów i zleceń w wybranym zakresie.")
-    for _k in _kraje:
-        _cl_k = [c for c in _calls if _kraj(c) == _k]
-        _nw_k = [z for z in _niewyk if _kraj(z) == _k]
-        _baza = len(_cl_k) + len(_nw_k)
-        if not _baza:
-            continue
-        _agg = {}
-        for _c in _cl_k:
-            _key = (_kto_disp(_c), _kraj(_c))
-            _a = _agg.setdefault(_key, {"Kto": _kto_disp(_c),
-                                        "Typ": (f"telefonistka ({_kto(_c)})" if _grupowy(_c)
-                                                else f"operator {_kraj(_c)}"),
-                                        "Telefony": 0, "Z ustaleniami": 0})
-            _a["Telefony"] += 1
-            if _oceniony(_c):
-                _a["Ocenione"] = _a.get("Ocenione", 0) + 1
-            if _z_ust(_c):
-                _a["Z ustaleniami"] += 1
-        _zlec_k = {}
-        for _z in _zlecenia:
-            if _kraj(_z) == _k:
-                _zlec_k[_z.get("zlecil") or "?"] = _zlec_k.get(_z.get("zlecil") or "?", 0) + 1
-        _rows = []
-        for _v in sorted(_agg.values(), key=lambda x: -x["Telefony"]):
-            _oc_v = _v.get("Ocenione", 0)
-            _v.pop("Ocenione", None)
-            _rows.append({**_v, "Zlecił": _zlec_k.get(_v["Kto"], 0),
-                          "Udział": f'{round(100*_v["Telefony"]/_baza)}%',
-                          "Skuteczność": (f'{round(100*_v["Z ustaleniami"]/_oc_v)}% ({_oc_v} z {_v["Telefony"]})'
-                                          if _oc_v else "⏳ czeka na ocenę")})
-        # osoby, które TYLKO zlecały (0 telefonów) — żeby było widać, kto oddaje wszystko dalej
-        for _o, _ile in sorted(_zlec_k.items(), key=lambda x: -x[1]):
-            if not any(r["Kto"] == _o for r in _rows):
-                _rows.append({"Kto": _o, "Typ": f"operator {_k}", "Telefony": 0, "Z ustaleniami": 0,
-                              "Zlecił": _ile, "Udział": "0%", "Skuteczność": "—"})
-        if _nw_k:
-            _rows.append({"Kto": "⚠️ ZLECONE, NIKT NIE ZADZWONIŁ", "Typ": "—", "Telefony": len(_nw_k),
-                          "Z ustaleniami": 0, "Zlecił": 0,
-                          "Udział": f'{round(100*len(_nw_k)/_baza)}%', "Skuteczność": "—"})
-        for _r in _rows:
-            _r.pop("Ocenione", None)
-        st.markdown(f"**{_k}** — telefony wykonane: {len(_cl_k)} · zlecenia bez telefonu: {len(_nw_k)} "
-                    f"· razem do zrobienia: {_baza}")
-        st.dataframe(pd.DataFrame(_rows), use_container_width=True, hide_index=True)
+    st.markdown("### 👥 Podsumowanie osobowe")
+    st.caption("Jeden wiersz na osobę — bez podziału na kraje. „TYP\" pokazuje rolę z obsady dnia "
+               "wraz z liczbą dni; ktoś może być raz dzwoniący, raz nie. Kategorie liczone z rozmów "
+               "wykonanych w wybranym zakresie. ZWROT wliczony do NIEEFEKTYWNYCH (tylko w tej tabeli).")
 
-    # ══ 2. TELEFONY WYKONANE ════════════════════════════════════════════════════
-    # ── pomocnicze do tabeli (definicje przepadły przy scalaniu tabel) ──
-    _GRUPA_JEZ = {"DE": "DE", "FR": "FR", "PL": "PL", "UK": "ENG", "UKPL": "ENG"}
-
-    def _jez_calla(_c):
-        return (str(_c.get("jezyk") or "").upper().strip()
-                or _GRUPA_JEZ.get(_kraj(_c).upper(), ""))
-
-    def _jezyki_osoby(_c):
-        """Języki operatora w grupie, w której wtedy pracował (z obsady dnia)."""
-        return {str(j).upper() for j in _jez_map.get((_kto(_c), _kraj(_c)), [])}
-
-    def _telefon_wiarygodny(_c):
-        """Operator mógł wykonać telefon tylko w JĘZYKU, który ma przypisany.
-        Rozmowa zostaje widoczna, ale dostaje ostrzeżenie."""
-        _lg = _jezyki_osoby(_c)
-        _js = _jez_calla(_c)
-        if not _lg or not _js:
-            return True
-        return _js in _lg
-
-    # Telefony operatorów — wszystkie, także po zleceniu (z woreczka).
-    _calls_op = [c for c in _calls if not _grupowy(c)]
-    _podejrzane = [c for c in _calls_op if not _telefon_wiarygodny(c)]
-
-    # ══ 2+3. WSZYSTKIE TELEFONY I ZLECENIA — JEDNA TABELA ═══════════════════════
-    st.markdown("### ☎️ Telefony i zlecenia")
-    st.caption("Wszystko w jednym miejscu: telefony operatorów, zlecenia na forum i podjęcia. "
-               "„OD KOGO\" = kto zlecił albo wykonał telefon. Link prowadzi wprost do wpisu na forum. "
-               "„USTALENIA\" to treść 1:1 — dokładnie to, co wpisał operator albo telefonistka.")
-
-    _FORUM_BASE = "https://f15.pmgtechnik.com"
-
-    def _link_md(_url, _pid):
-        """🟥 Link ZAWSZE pełny. Pusty adres Streamlit traktował jako odnośnik względny
-        i przekierowywał do Wieżowca zamiast na forum — dlatego budujemy go z numeru postu."""
-        _p = str(_pid or "").strip()
-        if not _p:
-            return ""
-        # 🟥 Wyświetlany numer to KONKRETNY wpis (#odp-), nie identyfikator wątku.
-        if _url and str(_url).startswith("http"):
-            if "#odp-" in str(_url):
-                return str(_url)
-            return f"{_url}#odp-{_p}"
-        return f"{_FORUM_BASE}/Wpisy/detailWpis?id={_p}&do_odpid={_p}#odp-{_p}"
-
-    _KOL = ["NR ZAMÓWIENIA", "WPIS", "ZLECONO", "OD KOGO", "DO KOGO",
-            "PODJĘTE", "CZY W TERMINIE", "STATUS", "UWAGI"]
-    _PROG_H = 6          # 🟥 termin = 6 godzin ROBOCZYCH od wpisu do odpowiedzi
-
-    def _termin_txt(_bm):
-        """Czas w godzinach roboczych + ocena względem progu."""
-        if _bm is None:
-            return ""
-        _h, _m = int(_bm // 60), int(_bm % 60)
-        _op = (f"+{_h}h {_m}min" if _h else f"+{_m}min")
-        return (f"✅ {_op}" if _bm <= _PROG_H * 60 else f"❌ {_op}")
-    _r_all = []
-
-    # ── telefony operatorów (pierwszy ruch, bez wcześniejszego zlecenia) ──
-    _tel_przed_zlec = {}          # id_postu zlecenia -> telefon operatora, który je wywołał
-    # 🟥 Telefon zapisuje NUMER WPISU, który po nim powstał — wiążemy po nim, nie po czasie.
-    #    Dopasowanie czasowe zostaje jako zapas dla starszych zapisów bez tego numeru.
-    _zlec_po_id = {str(_d.get("id_postu") or "").strip(): _d
-                   for _d in _deleg_ext if str(_d.get("id_postu") or "").strip()}
-    for _c in _calls_op:
-        _po_wpis = None
-        _pid_c = str(_c.get("post_id") or "").strip()
-        if _pid_c and _pid_c in _zlec_po_id:
-            _po_wpis = _zlec_po_id[_pid_c]
-        else:
-            _t_c = _dt(_c)
-            _kand = sorted([d for d in _dbn.get(str(_c.get("numer_zamowienia") or "").strip(), [])
-                            if _dt(d) and _t_c and _dt(d) >= _t_c - timedelta(minutes=15)], key=_mom)
-            _po_wpis = _kand[0] if _kand else None
-        # 🟥 Telefon zakończony ZLECENIEM to ta sama sprawa co wiersz zlecenia niżej —
-        #    nie dublujemy. Doklejamy go do tamtego wiersza jako początek przebiegu.
-        if _po_wpis:
-            _tel_przed_zlec[str(_po_wpis.get("id_postu") or "").strip()] = _c
-            continue
-        _r_all.append({
-            "NR ZAMÓWIENIA": _c.get("numer_zamowienia", ""),
-            "WPIS": _link_md(_c.get("link") or (_po_wpis or {}).get("link"),
-                             _c.get("post_id") or (_po_wpis or {}).get("id_postu")),
-            "ZLECONO": _mom(_c),
-            "OD KOGO": f'{_kto_disp(_c)} ({_kraj(_c)})',
-            "DO KOGO": ("do woreczka" if _po_wpis
-                        else ("raport na forum" if _c.get("post_id") else "— telefon bez wpisu")),
-            "PODJĘTE": f'📞 SESJA — {_kto_disp(_c)} · {_mom(_c)[11:]}',
-            "CZY W TERMINIE": "— (telefon w sesji, bez oczekiwania)",
-            "STATUS": _status(_c),
-            "UWAGI": ((f'wykryte {_c.get("wykryte_dnia")} · '
-                       if (_c.get("wykryte_dnia") and _c.get("wykryte_dnia") != _c.get("_dzien")) else "")
-                      + ("telefon operatora → wpis na forum" if _po_wpis
-                         else ("telefon operatora → raport na forum" if _c.get("post_id")
-                               else "telefon operatora"))
-                      + ("" if _telefon_wiarygodny(_c)
-                         else f' · ⚠️ język {_jez_calla(_c) or "?"} poza przypisanymi')),
-        })
-
-    # ── zlecenia na forum + podjęcia ──
-    for _z in sorted(_zlec_only, key=_mom, reverse=True):
-        _cc = _z.get("_call")
-        _t0, _t1 = _dt(_z), (_dt(_cc) if _cc else None)
-        _bm_ost, _pid_ost, _link_ost = None, None, None
-        _uw = ("↳ podbicie" if _z.get("typ") == "ponaglenie" else "zlecenie") \
-              + (" · wpis ręczny" if _z.get("recznie") else "")
-        # 🟥 Ile wpisów dotyczyło tej sprawy — zamiast osobnej kolumny.
-        _n_wp = 1 + int(_z.get("_pon", 0) or 0)
-        if _n_wp > 1:
-            _uw += f" · wpisów w sprawie: {_n_wp}"
-        if not _z.get("_call") and not _z.get("anulowane"):
-            _uw += " · brak telefonu — tylko wpisy"
-        if _cc:
-            _pid_odp = str(_cc.get("zlecenie_post_id") or "").strip()
-            _t0_real = _t0
-            if _pid_odp and _pid_odp != str(_z.get("id_postu") or "").strip():
-                for _p in _deleg_ext:
-                    if str(_p.get("id_postu") or "").strip() == _pid_odp:
-                        _t0_real = _dt(_p) or _t0
-                        break
-            # link i numer wpisu, OD KTÓREGO liczymy czas — przy podbiciu to podbicie
-            if _pid_odp and _pid_odp != str(_z.get("id_postu") or "").strip():
-                _pid_ost = _pid_odp
-                for _p2 in _deleg_ext:
-                    if str(_p2.get("id_postu") or "").strip() == _pid_odp:
-                        _link_ost = _p2.get("link")
-                        break
-            _delta = ""
-            _bm_ost = None
-            if _t0_real and _t1:
-                _bm = _biz_min(_t0_real, _t1)
-                _bm_ost = _bm
-                if _bm >= 0:
-                    _dr = int(_bm // 480)
-                    _gr = int((_bm % 480) // 60)
-                    _delta = (f' (+{_dr} dn. rob.)' if _dr
-                              else (f' (+{_gr}h {int(_bm%60)}min)' if _bm >= 60 else f' (+{int(_bm)}min)'))
-                    if _bm > 2 * 480:
-                        _uw += " · po terminie"
-            _podj = (f'💬 FORUM — {_kto(_cc)} / {_osoba(_cc)} · {_mom(_cc)[11:]}' if _grupowy(_cc)
-                     else f'📞 SESJA — {_kto(_cc)} z woreczka · {_mom(_cc)[11:]}')
-            # jeśli zlecenie powstało po nieudanym telefonie operatora — pokaż cały przebieg
-            _tel_pocz = _tel_przed_zlec.get(str(_z.get("id_postu") or "").strip())
-            if _tel_pocz:
-                _podj = (f'📞 SESJA — {_kto_disp(_tel_pocz)} · {_mom(_tel_pocz)[11:]} '
-                         f'({_status(_tel_pocz)}) → {_podj}')
-            if _cc.get("_dzien") not in _dni_set:
-                _uw += f' · odpowiedź z {_cc.get("_dzien")}'    
-        elif _z.get("anulowane"):
-            _podj = "🚫 ANULOWANE"
-        elif _z.get("_pon", 0) > 0:
-            _podj = f'⏳ PODBICIE ×{_z["_pon"]} — nikt nie zadzwonił'
-            if _t0 and _biz_min(_t0, _now) > 960:
-                _uw += " · ⚠️ przeterminowane (>2 dni robocze)"
-        else:
-            _tel_pocz = _tel_przed_zlec.get(str(_z.get("id_postu") or "").strip())
-            _podj = ((f'📞 SESJA — {_kto_disp(_tel_pocz)} · {_mom(_tel_pocz)[11:]} '
-                      f'({_status(_tel_pocz)}) → ⏳ czeka') if _tel_pocz
-                     else "⏳ czeka na aktualizację")
-            if _t0 and _biz_min(_t0, _now) > 960:
-                _uw += " · ⚠️ przeterminowane (>2 dni robocze)"
-        _r_all.append({
-            "NR ZAMÓWIENIA": _z.get("numer_zamowienia", ""),
-            "WPIS": _link_md(_link_ost or _z.get("link"), _pid_ost or _z.get("id_postu")),
-            "ZLECONO": _mom(_z),
-            "OD KOGO": f'{_z.get("zlecil", "")} ({_kraj(_z)})',
-            "DO KOGO": _z.get("do_kogo", ""),
-            "PODJĘTE": _podj,
-            "CZY W TERMINIE": (_termin_txt(_bm_ost) if _bm_ost is not None else "⏳ czeka"),
-            "STATUS": _status(_cc),
-            "UWAGI": _uw.replace("zlecenie · ", "").strip(" ·") or "—",
-        })
-
-    if _szukaj_nr:
-        _r_all = [r for r in _r_all if _szukaj_nr in str(r.get("NR ZAMÓWIENIA") or "")]
-        st.info(f"🔍 Filtr: numer zawierający „{_szukaj_nr}\" — {len(_r_all)} wpisów. "
-                f"Wyczyść pole, żeby wrócić do pełnej listy.")
-    _df_all = pd.DataFrame(sorted(_r_all, key=lambda r: r["ZLECONO"], reverse=True), columns=_KOL)
-    st.dataframe(_df_all, use_container_width=True, hide_index=True,
-                 column_config={"WPIS": st.column_config.LinkColumn(
-                     "WPIS", width="small", display_text=r"odp-(\d+)")})
-    if _r_all:
-        st.download_button("⬇️ CSV — telefony i zlecenia", _df_all.to_csv(index=False).encode("utf-8"),
-                           file_name=f"telefony_zlecenia_{_t_from}_{_t_to}.csv", mime="text/csv", key="_csv_all")
-        _byz = {}
-        for _z in _zlec_only:
-            _a = _byz.setdefault((_z.get("zlecil") or "?", _kraj(_z)),
-                                 {"Operator": _z.get("zlecil") or "?", "Grupa": _kraj(_z),
-                                  "Zlecił": 0, "Podjęte": 0, "Czeka": 0})
-            _a["Zlecił"] += 1
-            _a["Podjęte" if _z.get("_call") else "Czeka"] += 1
-        if _byz:
-            st.markdown("#### 👤 Kto zlecił telefony")
-            st.dataframe(pd.DataFrame(sorted(_byz.values(), key=lambda x: -x["Zlecił"])),
-                         use_container_width=True, hide_index=True)
-
-    # ══ 5. PODZIAŁ NA KRAJE ═════════════════════════════════════════════════════
-    st.markdown("### 🌍 Kraje — skuteczność i czas reakcji")
-    st.caption("Miary, których nie ma w innych tabelach: ile rozmów kończy się ustaleniami "
-               "i jak szybko telefonistki podejmują zlecenia w danym kraju.")
-    _rk = []
-    for _k in _kraje:
-        _cl_k = [c for c in _calls if _kraj(c) == _k]
-        _zl_k = [z for z in _zlecenia if _kraj(z) == _k]
-        _nw_k = [z for z in _niewyk if _kraj(z) == _k]
-        _jp, _joc = _jakosc(_cl_k)
-        # czas reakcji: od zlecenia do rozmowy telefonistki (godziny robocze)
-        _reak = []
-        for _z in _zl_k:
-            _cc = _z.get("_call")
-            if not _cc or not _grupowy(_cc):
-                continue
-            _t0, _t1 = _dt(_z), _dt(_cc)
-            if _t0 and _t1 and _t1 >= _t0:
-                _reak.append(_biz_min(_t0, _t1))
-        _sr = (sum(_reak) / len(_reak)) if _reak else None
-        _rk.append({
-            "Kraj": _k,
-            "Rozmowy": len(_cl_k),
-            "Z ustaleniami": sum(1 for c in _cl_k if _z_ust(c)),
-            "Skuteczność": (f"{_jp}%" if _joc else "⏳ czeka"),
-            "Zlecenia": len(_zl_k),
-            "Niepodjęte": len(_nw_k),
-            "Śr. czas podjęcia": (f"{int(_sr//60)}h {int(_sr%60)}min" if _sr is not None else "—"),
-            "W 2h roboczych": (f"{round(100*sum(1 for r in _reak if r <= 120)/len(_reak))}%" if _reak else "—"),
-        })
-    if _rk:
-        st.dataframe(pd.DataFrame(_rk), use_container_width=True, hide_index=True)
-        st.caption("„Niepodjęte\" = zlecenia, przy których nikt nie zadzwonił do końca zakresu. "
-                   "Czas podjęcia liczony w godzinach roboczych 9-17, tylko dla rozmów telefonistek.")
-
-    # ══ 6. JAKOŚĆ I WYKONALNOŚĆ — PER KRAJ ══════════════════════════════════════
-    st.markdown("### 📊 Jakość i wykonalność")
-    st.caption("**Jakość** = ile z ocenionych rozmów dało ustalenia. W nawiasie podstawa: ile rozmów "
-               "ma już werdykt. „⏳ czeka na ocenę\" = żadna rozmowa nie została jeszcze oceniona, "
-               "więc procent byłby mylący.")
-    # 🟥 Dzwoniącym w danym kraju jest ten, kto MÓGŁ tam zadzwonić: albo faktycznie zadzwonił,
-    #    albo ma w tym kraju język, który występuje w tamtejszych sprawach. Sam checkbox nie wystarcza —
-    #    osoba dzwoniąca po polsku, pracująca dziś w DE, tam wyłącznie zleca.
-    _jez_kraju = {}
-    for _z in _zlec_only:
-        _jez_kraju.setdefault(_kraj(_z), set()).add(str(_z.get("jezyk") or "").upper())
-    _dzw_set = {(_kto(c), _kraj(c)) for c in _calls if not _grupowy(c)}
+    # ── role z obsady dnia: ile dni ktoś był dzwoniący / niedzwoniący ──
+    _role_dni = {}
     for _o in _obsada:
-        if not _o.get("dzwoni"):
+        _nk = str(_o.get("operator") or "").strip()
+        if not _nk:
             continue
-        _lg = {str(j).upper() for j in (_o.get("jezyki") or [])}
-        if _lg & _jez_kraju.get(_kraj(_o), set()):
-            _dzw_set.add((_o.get("operator"), _kraj(_o)))
-    if not _obsada:
-        st.caption("⚠️ Brak zapisu obsady — pokazuję osoby, które faktycznie dzwoniły.")
+        _a = _role_dni.setdefault(_nk, {"dzw": set(), "nie": set()})
+        _a["dzw" if _o.get("dzwoni") else "nie"].add(str(_o.get("dzien") or ""))
 
-    _wszyscy = []
-    for _k in _kraje:
-        _cl_k = [c for c in _calls if _kraj(c) == _k]
-        _suma_k = len(_cl_k)
-        _rows_w = []
-        for (_op, _gr) in sorted(_dzw_set):
-            if _gr != _k:
-                continue
-            _lst = [c for c in _cl_k if not _grupowy(c) and _kto(c) == _op]
-            _jp, _joc = _jakosc(_lst)
-            _rows_w.append({"Kto": _op, "Rozmowy": len(_lst),
-                            "Z ustaleniami": sum(1 for c in _lst if _z_ust(c)),
-                            "Jakość": (("⏳ czeka na ocenę" if not _joc
-                                        else (f"{_jp}%" if _joc == len(_lst)
-                                              else f"{_jp}% (ocenione {_joc} z {len(_lst)})"))),
-                            "_j": _jp, "_n": len(_lst), "_oc": _joc, "_kraj": _k})
-        for _gd in sorted({_kto_disp(c) for c in _cl_k if _grupowy(c)}):
-            _lst = [c for c in _cl_k if _grupowy(c) and _kto_disp(c) == _gd]
-            _jp, _joc = _jakosc(_lst)
-            _rows_w.append({"Kto": _gd, "Rozmowy": len(_lst),
-                            "Z ustaleniami": sum(1 for c in _lst if _z_ust(c)),
-                            "Jakość": (("⏳ czeka na ocenę" if not _joc
-                                        else (f"{_jp}%" if _joc == len(_lst)
-                                              else f"{_jp}% (ocenione {_joc} z {len(_lst)})"))),
-                            "_j": _jp, "_n": len(_lst), "_oc": _joc, "_kraj": _k})
-        if not _rows_w:
-            continue
-        st.markdown(f"#### {_k} — telefonów w grupie: {_suma_k}")
+    def _typ_osoby(_nk, _grupowa=False):
+        if _grupowa:
+            return "telefonistka"
+        _r = _role_dni.get(_nk)
+        if not _r:
+            return "operator"
+        _cz = []
+        if _r["dzw"]:
+            _cz.append(f'dzwoniący ({len(_r["dzw"])} dni)' if len(_r["dzw"]) > 1
+                       else "dzwoniący (1 dzień)")
+        if _r["nie"]:
+            _cz.append(f'niedzwoniący ({len(_r["nie"])} dni)' if len(_r["nie"]) > 1
+                       else "niedzwoniący (1 dzień)")
+        return " / ".join(_cz) or "operator"
+
+    # ── zbieramy po osobie ──
+    _KAT = {"ustalono_termin": "KURIER", "konkret": "KURIER",
+            "ustalono_termin_na_termin": "TERMIN NA TERMIN", "przelozenie": "TERMIN NA TERMIN",
+            "nieodebral": "NIEODEBRANE", "brak_kontaktu": "NIEODEBRANE",
+            "nieproduktywne": "NIEEFEKTYWNE", "kontakt_bez_konkretu": "NIEEFEKTYWNE",
+            "zwrot": "NIEEFEKTYWNE"}          # 🟥 zwrot pod nieefektywne — TYLKO w tej tabeli
+    _osoby = {}
+    for _c in _calls:
+        _nk = _kto_disp(_c)
+        _a = _osoby.setdefault(_nk, {"Kto": _nk, "_grup": _grupowy(_c), "_kraje": set(),
+                                     "TERMIN NA TERMIN": 0, "KURIER": 0, "NIEODEBRANE": 0,
+                                     "NIEEFEKTYWNE": 0, "_tel": 0, "_skut": 0})
+        _a["_kraje"].add(_kraj(_c))
+        _a["_tel"] += 1
+        _kat = _KAT.get(_c.get("wynik") or "")
+        if _kat:
+            _a[_kat] += 1
+        if _z_ust(_c):
+            _a["_skut"] += 1
+    # zlecenia — dopisujemy do osób, także tych bez telefonów
+    _zlec_os = {}
+    for _z in _zlec_only:
+        _nk = str(_z.get("zlecil") or "?").strip()
+        _zlec_os[_nk] = _zlec_os.get(_nk, 0) + 1
+    for _nk in _zlec_os:
+        _osoby.setdefault(_nk, {"Kto": _nk, "_grup": False, "_kraje": set(),
+                                "TERMIN NA TERMIN": 0, "KURIER": 0, "NIEODEBRANE": 0,
+                                "NIEEFEKTYWNE": 0, "_tel": 0, "_skut": 0})
+
+    _rows_os = []
+    for _nk, _a in _osoby.items():
+        _rows_os.append({
+            "KTO": _nk,
+            "TYP": _typ_osoby(_nk, _a["_grup"]),
+            "TERMIN NA TERMIN": _a["TERMIN NA TERMIN"],
+            "KURIER": _a["KURIER"],
+            "NIEODEBRANE": _a["NIEODEBRANE"],
+            "NIEEFEKTYWNE": _a["NIEEFEKTYWNE"],
+            "TELEFONY": _a["_tel"],
+            "ZLECIŁ": _zlec_os.get(_nk, 0),
+            "SKUTECZNOŚĆ": (f'{round(100 * _a["_skut"] / _a["_tel"])}%' if _a["_tel"] else "—"),
+            "_n": _a["_tel"],
+            "_j": (round(100 * _a["_skut"] / _a["_tel"]) if _a["_tel"] else 0),
+            "_kraj": ", ".join(sorted(_a["_kraje"])) or "—",
+        })
+    _rows_os.sort(key=lambda r: (-r["TELEFONY"], -r["ZLECIŁ"]))
+    if _rows_os:
         st.dataframe(pd.DataFrame([{k: v for k, v in r.items() if not k.startswith("_")}
-                                   for r in sorted(_rows_w, key=lambda r: -r["Rozmowy"])]),
+                                   for r in _rows_os]),
                      use_container_width=True, hide_index=True)
-        _wszyscy.extend(_rows_w)
+        st.caption("SKUTECZNOŚĆ = udział rozmów z ustaleniami (kurier + termin na termin) we "
+                   "wszystkich wykonanych telefonach.")
+    else:
+        st.caption("Brak telefonów i zleceń w wybranym zakresie.")
 
-    # ── DWA ZBIORCZE WYKRESY (zamiast wykresu na osobę) ──
-    if _wszyscy:
-        _sort = sorted(_wszyscy, key=lambda r: -r["_n"])
-        _maxn = max(r["_n"] for r in _sort) or 1
+    # ── ZLECONE, NIKT NIE ZADZWONIŁ — per kraj ──
+    if _niewyk:
+        _nw_kraj = {}
+        for _z in _niewyk:
+            _nw_kraj[_kraj(_z)] = _nw_kraj.get(_kraj(_z), 0) + 1
+        st.markdown("#### ⚠️ Zlecone, nikt nie zadzwonił")
+        st.dataframe(pd.DataFrame([{"KRAJ": k, "ZLECEŃ BEZ TELEFONU": v}
+                                   for k, v in sorted(_nw_kraj.items(), key=lambda x: -x[1])]),
+                     use_container_width=True, hide_index=True)
+
+    # ── DWA WYKRESY (przepięte na tabelę osobową) ──
+    if _rows_os:
+        _sort = [r for r in _rows_os if r["_n"] > 0]
+        _maxn = max([r["_n"] for r in _sort], default=1) or 1
 
         def _slupki(_dane, _wart, _maxv, _kolor, _fmt, _oceny=False):
             _kol = []
             for _d in _dane:
                 _v = _d[_wart]
-                _brak_oceny = _oceny and not _d.get("_oc")
-                # 🟥 Brak ocen ≠ zero. Szary słupek mówi „nie wiadomo", zamiast sugerować porażkę.
-                if _brak_oceny:
-                    _kolor_s, _h, _podpis = "#6B6B7B", 24, "czeka na ocenę"
+                _brak = _oceny and not _d["_n"]
+                if _brak:
+                    _kolor_s, _h, _podpis = "#6B6B7B", 24, "brak"
                 else:
                     _kolor_s = _kolor
                     _h = max(2, int(160 * _v / _maxv)) if _maxv else 2
                     _podpis = _fmt(_d)
-                _slaby = _d["_n"] < 3
-                _op = ";opacity:.45" if _slaby else ""
+                _op = ";opacity:.45" if _d["_n"] < 3 else ""
                 _kol.append(
                     '<div style="display:flex;flex-direction:column;align-items:center;min-width:88px;flex:1">'
                     '<div style="display:flex;align-items:flex-end;height:170px">'
                     f'<div style="width:34px;height:{_h}px;background:{_kolor_s};border-radius:3px 3px 0 0{_op}"></div>'
                     '</div>'
                     f'<div style="font-size:12px;margin-top:5px;font-weight:500">{_podpis}</div>'
-                    f'<div style="font-size:11px;color:#888;text-align:center;line-height:1.3;margin-top:2px">{_d["Kto"]}</div>'
+                    f'<div style="font-size:11px;color:#888;text-align:center;line-height:1.3;margin-top:2px">{_d["KTO"]}</div>'
                     f'<div style="font-size:10px;color:#666">{_d["_kraj"]}</div>'
                     '</div>')
             st.markdown('<div style="display:flex;gap:10px;align-items:flex-end;overflow-x:auto;padding:6px 0">'
                         + "".join(_kol) + '</div>', unsafe_allow_html=True)
 
-        st.markdown("##### 📞 Kto ile wykonał rozmów")
-        _slupki(_sort, "_n", _maxn, "#7F77DD", lambda d: str(d["_n"]))
-        st.markdown("##### 🎯 Jakość tych samych osób")
-        st.caption("Kolejność ta sama co wyżej. Wyszarzone = mniej niż 3 rozmowy, wynik mało wiarygodny.")
-        _slupki(_sort, "_j", 100, "#1D9E75", lambda d: f'{d["_j"]}%', _oceny=True)
-
-    st.caption("Przy mniej niż 5 rozmowach procenty są mało wiarygodne — jeden wynik przesuwa je o 20 punktów. "
-               "Suma wykonalności w obrębie kraju daje 100% (osoba z 0 telefonów ma 0%).")
+        if _sort:
+            st.markdown("##### 📞 Kto ile wykonał rozmów")
+            _slupki(_sort, "_n", _maxn, "#7F77DD", lambda d: str(d["_n"]))
+            st.markdown("##### 🎯 Skuteczność tych samych osób")
+            st.caption("Kolejność ta sama co wyżej. Wyszarzone = mniej niż 3 rozmowy.")
+            _slupki(_sort, "_j", 100, "#1D9E75", lambda d: f'{d["_j"]}%', _oceny=True)
 
     # ══ 6b. ZBIORCZO: TELEFONISTKI vs OPERATORZY DZWONIĄCY (per kraj) ════════════
     st.markdown("### ⚖️ Telefonistki vs operatorzy dzwoniący")
